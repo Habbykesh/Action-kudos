@@ -1,9 +1,10 @@
-const { PermissionFlagsBits } = require('discord.js');
+const { PermissionFlagsBits, EmbedBuilder } = require('discord.js');
 const pool = require('./db/pool');
 const config = require('./config');
 const { isAppreciation } = require('./phraseEngine');
 const { ensureHelperRole } = require('./helperRole');
 const audit = require('./audit');
+const systemState = require('./systemState');
 
 const HELP_WINDOW_MS = config.helpWindowHours * 60 * 60 * 1000;
 
@@ -41,6 +42,9 @@ async function tryProcessThankYou(client, message) {
     if (!message.guild) return;
     if (message.author.bot) return;
     if (!message.reference?.messageId) return;
+
+    const enabled = await systemState.isEnabled(message.guild.id);
+    if (!enabled) return;
 
     const helpMessage = await message.channel.messages
       .fetch(message.reference.messageId)
@@ -177,13 +181,17 @@ async function processValidThankYou(client, thankMessage, helpMessage) {
 
       if (insertResult.rowCount === 0) return;
 
-      await thankMessage.channel.send({
-        content:
-          `🎉 <@${helperId}> You've been recognized for helping a fellow builder!\n` +
-          `You've earned **${config.engagePointsPerReward} Engage Points**.\n` +
-          `Your reward is currently pending because Engage Points are awarded manually.\n` +
-          `Please tag a moderator to have your ${config.engagePointsPerReward} Engage Points awarded. 🤝`,
-      });
+      const embed = new EmbedBuilder()
+        .setColor(0x8b5cf6)
+        .setTitle('🎉 Helper Recognized!')
+        .setDescription("You've been recognized for helping a fellow builder!")
+        .addFields(
+          { name: '🏆 Reward Earned', value: `${config.engagePointsPerReward} Engage Points`, inline: true },
+          { name: '⏳ Status', value: 'Pending manual award', inline: true },
+        )
+        .setFooter({ text: 'Tag a moderator to have your Engage Points awarded 🤝' });
+
+      await thankMessage.channel.send({ content: `<@${helperId}>`, embeds: [embed] });
 
       await audit.postPendingEngageReward(client, {
         guildId: guild.id,

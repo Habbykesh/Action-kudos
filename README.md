@@ -87,10 +87,11 @@ Enable Developer Mode (User Settings → Advanced), then right-click to copy:
    - scans for any thank-yous missed since it was last online,
    - starts listening in real time.
 
-## 3. Register the slash command
+## 3. Register the slash commands
 
-`/thanks` needs to be registered once (and again only if you change the
-command itself). Easiest way with Railway: open the service → **⋮ menu → Run Command** (or use `railway run`) and run:
+`/thanks` and `/rewards` need to be registered once (and again only if you
+change a command's structure). Easiest way with Railway: open the service →
+**⋮ menu → Run Command** (or use `railway run`) and run:
 
 ```
 npm run deploy-commands
@@ -107,7 +108,19 @@ npm run deploy-commands
 Since commands are registered per-guild (`GUILD_ID`), they show up
 instantly — no waiting on global command propagation.
 
-## 4. Verify it works
+## 4. The system starts OFF by default
+
+**Important:** on a fresh install, the reward system is disabled until you
+turn it on — no thank-you will be rewarded, nothing will be posted, even
+though the bot is online. This is deliberate, so you can deploy, test, and
+review before anything is user-facing.
+
+Run `/rewards status` to confirm it's off, and `/rewards enable` whenever
+you're ready to go live. `/rewards disable` turns it back off at any time —
+the bot stays online and connected, it just ignores thank-yous while
+disabled (nothing is queued up to process later).
+
+## 5. Verify it works
 
 1. In your server, have one member reply to another member's message with
    "thanks!" — the helper should either get the temporary `Helper` role

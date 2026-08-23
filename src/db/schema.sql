@@ -28,10 +28,14 @@ CREATE TABLE IF NOT EXISTS custom_phrases (
   UNIQUE(guild_id, phrase)
 );
 
--- Per-guild bot state: the persistent Helper role id, and a heartbeat timestamp
--- used to recover from downtime.
+-- Per-guild bot state: the persistent Helper role id, a heartbeat timestamp
+-- used to recover from downtime, and a manual on/off switch (see /rewards).
 CREATE TABLE IF NOT EXISTS bot_config (
   guild_id TEXT PRIMARY KEY,
   helper_role_id TEXT,
-  last_seen TIMESTAMPTZ
+  last_seen TIMESTAMPTZ,
+  enabled BOOLEAN NOT NULL DEFAULT false
 );
+
+-- Safe to re-run: adds the column for databases created before this existed.
+ALTER TABLE bot_config ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT false;

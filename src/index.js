@@ -6,6 +6,7 @@ const { ensureHelperRole } = require('./helperRole');
 const { recoverGuild } = require('./recovery');
 const { tryProcessThankYou } = require('./rewardService');
 const thanksCommand = require('./commands/thanks');
+const rewardsCommand = require('./commands/rewards');
 
 const client = new Client({
   intents: [
@@ -19,6 +20,7 @@ const client = new Client({
 
 client.commands = new Collection();
 client.commands.set(thanksCommand.data.name, thanksCommand);
+client.commands.set(rewardsCommand.data.name, rewardsCommand);
 
 let heartbeatTimer = null;
 

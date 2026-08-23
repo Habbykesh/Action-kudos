@@ -1,5 +1,6 @@
 const { PermissionFlagsBits, SnowflakeUtil, ChannelType } = require('discord.js');
 const botConfig = require('./botConfig');
+const systemState = require('./systemState');
 const { tryProcessThankYou } = require('./rewardService');
 
 const MAX_PAGES_PER_CHANNEL = 50; // 50 * 100 = up to 5000 messages per channel
@@ -45,10 +46,28 @@ async function scanChannel(client, channel, afterSnowflake) {
  */
 async function recoverGuild(client, guild) {
   const lastSeen = await botConfig.getLastSeen(guild.id);
-  const fallback = new Date(Date.now() - 24 * 60 * 60 * 1000);
-  const since = lastSeen ? new Date(lastSeen) : fallback;
 
+  if (!lastSeen) {
+    // No last_seen on record means this is the bot's very first startup for
+    // this guild — there's no real "downtime" to recover from, so don't
+    // backfill history. Just mark "now" as the starting point and move on.
+    console.log(`[recovery] First-ever startup for guild ${guild.id} — skipping backfill, starting fresh from now.`);
+    await botConfig.updateLastSeen(guild.id, new Date());
+    return;
+  }
+
+  const since = new Date(lastSeen);
   console.log(`[recovery] Scanning guild ${guild.id} for messages since ${since.toISOString()}`);
+
+  const enabled = await systemState.isEnabled(guild.id);
+  if (!enabled) {
+    // The system is deliberately turned off — don't burn API calls scanning
+    // history that would just get ignored anyway. Just move the checkpoint
+    // forward so a later /rewards enable starts clean from "now".
+    console.log(`[recovery] System is disabled for guild ${guild.id} — skipping scan.`);
+    await botConfig.updateLastSeen(guild.id, new Date());
+    return;
+  }
 
   const afterSnowflake = snowflakeForTimestamp(since);
   const me = guild.members.me;
