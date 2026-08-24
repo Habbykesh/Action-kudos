@@ -31,6 +31,8 @@ const config = {
   actionPointsPerReward: int('ACTION_POINTS_PER_REWARD', 1000),
   engagePointsPerReward: int('ENGAGE_POINTS_PER_REWARD', 100),
   helperDailyLimit: int('HELPER_DAILY_LIMIT', 15),
+  thankerDailyLimit: int('THANKER_DAILY_LIMIT', 5),
+  thankerDailyLimit: int('THANKER_DAILY_LIMIT', 15),
   helpWindowHours: int('HELP_WINDOW_HOURS', 24),
   heartbeatIntervalMs: int('HEARTBEAT_INTERVAL_MS', 30000),
 

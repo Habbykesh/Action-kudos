@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS reward_events (
 
 CREATE INDEX IF NOT EXISTS idx_reward_helper_day ON reward_events (helper_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reward_pair_day ON reward_events (helper_id, thanker_id, created_at);
+CREATE INDEX IF NOT EXISTS idx_reward_thanker_day ON reward_events (thanker_id, created_at);
 CREATE INDEX IF NOT EXISTS idx_reward_guild ON reward_events (guild_id);
 
 -- Admin-managed appreciation phrases, in addition to the built-in multilingual list.

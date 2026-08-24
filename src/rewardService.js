@@ -115,6 +115,18 @@ async function processValidThankYou(client, thankMessage, helpMessage) {
       return;
     }
 
+    // Thanker daily cap: how many rewards this thanker has triggered today,
+    // across all helpers.
+    const thankerCountToday = await client_.query(
+      `SELECT COUNT(*)::int AS count FROM reward_events
+       WHERE thanker_id = $1 AND created_at >= $2 AND created_at < $3`,
+      [thankerId, dayStart, dayEnd]
+    );
+    if (thankerCountToday.rows[0].count >= config.thankerDailyLimit) {
+      await client_.query('ROLLBACK');
+      return;
+    }
+
     const isOg = helperMember.roles.cache.has(config.ogRoleId);
 
     if (isOg) {
