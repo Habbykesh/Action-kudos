@@ -158,6 +158,18 @@ async function processValidThankYou(client, thankMessage, helpMessage) {
 
       await helperMember.roles.add(helperRole.id, 'Community helper reward — Action Points via MEE6');
 
+      const embed = new EmbedBuilder()
+        .setColor(0x57f287)
+        .setTitle('🎉 Helper Recognized!')
+        .setDescription("You've been recognized for helping a fellow builder!")
+        .addFields(
+          { name: '🏆 Reward Earned', value: `${config.actionPointsPerReward} Action Points`, inline: true },
+          { name: '✅ Status', value: 'Awarded', inline: true },
+        )
+        .setFooter({ text: 'Keep it up! 🙌' });
+
+      await thankMessage.channel.send({ content: `<@${helperId}>`, embeds: [embed] });
+
       await audit.postActionPointReward(client, {
         guildId: guild.id,
         channelId: thankMessage.channel.id,
