@@ -6,6 +6,7 @@ const pidginAudit = require('../pidgin/pidginAudit');
 const dailyState = require('../pidgin/dailyState');
 const pool = require('../db/pool');
 const { ensurePidginRoles } = require('../pidgin/poRoles');
+const { getEscalation } = require('../pidgin/pidginPunishment');
 const { BASE_TERMS } = require('../pidgin/dictionary');
 
 const data = new SlashCommandBuilder()
@@ -35,6 +36,20 @@ const data = new SlashCommandBuilder()
       .setName('reset')
       .setDescription("Reset a user's current-day offence count. Historical records are kept.")
       .addUserOption((opt) => opt.setName('user').setDescription('The user to reset').setRequired(true))
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('resetall')
+      .setDescription("Reset EVERY member's current-day offence count for this server. Historical records are kept.")
+      .addBooleanOption((opt) =>
+        opt.setName('confirm').setDescription('Set true to confirm this server-wide reset').setRequired(true)
+      )
+  )
+  .addSubcommand((sub) =>
+    sub
+      .setName('streak')
+      .setDescription("Check a user's current offence count for today.")
+      .addUserOption((opt) => opt.setName('user').setDescription('The user to check').setRequired(true))
   )
   .addSubcommand((sub) => sub.setName('settings').setDescription('View the current Pidgin Enforcement configuration.'))
   .addSubcommandGroup((group) =>
@@ -90,6 +105,10 @@ async function execute(interaction) {
       return executeList(interaction, guildId);
     case 'reset':
       return executeReset(interaction, guildId);
+    case 'resetall':
+      return executeResetAll(interaction, guildId);
+    case 'streak':
+      return executeStreak(interaction, guildId);
     case 'settings':
       return executeSettings(interaction, guildId);
     default:
@@ -187,6 +206,55 @@ async function executeReset(interaction, guildId) {
   });
 }
 
+async function executeResetAll(interaction, guildId) {
+  const confirm = interaction.options.getBoolean('confirm', true);
+  if (!confirm) {
+    await interaction.reply({
+      content: 'Cancelled — run `/pidgin resetall confirm:true` if you meant to reset every member\'s streak for today.',
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const dbClient = await pool.connect();
+  try {
+    await dbClient.query('BEGIN');
+    await dailyState.recordGuildReset(dbClient, guildId, interaction.user.id);
+    await dbClient.query('COMMIT');
+  } catch (err) {
+    await dbClient.query('ROLLBACK').catch(() => {});
+    console.error('[pidgin command] Failed to record guild-wide reset:', err);
+    await interaction.reply({ content: 'Something went wrong recording that reset.', ephemeral: true });
+    return;
+  } finally {
+    dbClient.release();
+  }
+
+  await pidginAudit.postGuildReset(interaction.client, { resetBy: interaction.user.id });
+  await interaction.reply({
+    content: "♻️ Reset **every member's** active offence count for today back to 0. Historical records were kept.",
+    ephemeral: true,
+  });
+}
+
+async function executeStreak(interaction, guildId) {
+  const user = interaction.options.getUser('user', true);
+  const { count } = await dailyState.getCurrentStreak(pool, guildId, user.id);
+
+  if (count === 0) {
+    await interaction.reply({ content: `<@${user.id}> has **no offences** recorded today.`, ephemeral: true });
+    return;
+  }
+
+  const next = getEscalation(count + 1);
+  await interaction.reply({
+    content:
+      `<@${user.id}> is currently at **${count}** offence${count === 1 ? '' : 's'} today.\n` +
+      `Their next offence (#${count + 1}) would trigger: **${next.label}**.`,
+    ephemeral: true,
+  });
+}
+
 async function executeSettings(interaction, guildId) {
   const enabled = await pidginConfig.isEnabled(guildId);
   const excluded = await pidginConfig.getExcludedChannels(guildId);
@@ -205,13 +273,14 @@ async function executeSettings(interaction, guildId) {
       {
         name: 'Punishment structure',
         value:
-          '1st: PO1 → -1,000 AP\n' +
-          '2nd: PO2 → -3,000 AP\n' +
-          '3rd: PO3 → -10,000 AP\n' +
-          '4th: 10-minute timeout\n' +
-          '5th: 1-hour timeout\n' +
+          '1st: Warning only\n' +
+          '2nd: PO1 → -1,000 AP\n' +
+          '3rd: PO2 → -3,000 AP\n' +
+          '4th: PO3 → -10,000 AP\n' +
+          '5th: 10-minute timeout\n' +
           '6th: 1-hour timeout\n' +
-          '7th: 24-hour timeout',
+          '7th: 1-hour timeout\n' +
+          '8th: 24-hour timeout',
         inline: false,
       },
       { name: 'Daily reset', value: 'Every day at 00:00 UTC (active count only — history is kept forever)', inline: false }

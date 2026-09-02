@@ -64,6 +64,22 @@ async function postManualReset(client, { userId, resetBy }) {
   await channel.send({ embeds: [embed] });
 }
 
+async function postGuildReset(client, { resetBy }) {
+  const channel = await getAuditChannel(client);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('♻️ Pidgin offence counts reset for the whole server')
+    .addFields(
+      { name: 'Reset by', value: `<@${resetBy}>`, inline: true },
+      { name: 'Note', value: "Every member's active offence count for today was reset to 0. Historical offence records were not deleted.", inline: false },
+    )
+    .setTimestamp(new Date());
+
+  await channel.send({ embeds: [embed] });
+}
+
 async function postDictionaryChange(client, { actorId, action, term }) {
   const channel = await getAuditChannel(client);
   if (!channel) return;
@@ -131,6 +147,7 @@ module.exports = {
   postOffence,
   postActionFailure,
   postManualReset,
+  postGuildReset,
   postDictionaryChange,
   postEnforcementToggle,
   postChannelConfigChange,

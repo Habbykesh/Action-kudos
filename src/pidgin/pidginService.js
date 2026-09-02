@@ -79,8 +79,9 @@ async function handleOffence(client, message, member, matchedTerms, edited) {
       return; // this exact message already produced an offence
     }
 
-    const lastReset = await dailyState.getLastManualResetToday(dbClient, guildId, member.id, dayStart, dayEnd);
-    const countSince = lastReset || dayStart;
+    const lastUserReset = await dailyState.getLastManualResetToday(dbClient, guildId, member.id, dayStart, dayEnd);
+    const lastGuildReset = await dailyState.getLastGuildResetToday(dbClient, guildId, dayStart, dayEnd);
+    const countSince = dailyState.latestResetPoint(dayStart, lastUserReset, lastGuildReset);
     const priorCount = await dailyState.countOffencesSince(dbClient, guildId, member.id, countSince, dayEnd);
     offenceNumber = priorCount + 1;
     escalation = pidginPunishment.getEscalation(offenceNumber);
@@ -109,7 +110,7 @@ async function handleOffence(client, message, member, matchedTerms, edited) {
   // Punishment is applied after the offence is durably recorded, so a
   // failure here never loses the record (spec §19: "never silently fail").
   let poRoles = null;
-  if (escalation.type !== 'timeout') {
+  if (escalation.type === 'po1' || escalation.type === 'po2' || escalation.type === 'po3') {
     poRoles = await ensurePidginRoles(guild).catch((err) => {
       console.error('[pidginService] Failed to ensure PO roles:', err);
       return null;

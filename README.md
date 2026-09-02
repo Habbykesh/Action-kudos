@@ -179,20 +179,23 @@ process later while off — it's ignored in real time, not backfilled.
 | `/pidgin channels list` | Show which channels are excluded |
 | `/pidgin channels remove #channel` | Exclude a channel (enforcement is server-wide by default) |
 | `/pidgin channels add #channel` | Re-include a previously excluded channel |
-| `/pidgin reset @user` | Zero out a user's active offence count for today (history kept) |
+| `/pidgin streak @user` | Check a user's current offence count for today and what their next offence would trigger |
+| `/pidgin reset @user` | Zero out one user's active offence count for today (history kept) |
+| `/pidgin resetall confirm:true` | Zero out **everyone's** active offence count for today (history kept) — e.g. after changing the escalation table |
 | `/pidgin settings` | Full current configuration at a glance |
 
 Escalation (per user, per UTC calendar day, resets at 00:00 UTC):
 
 | Offence | Action |
 |---|---|
-| 1st | `PO1` role → −1,000 Action Points |
-| 2nd | `PO2` role → −3,000 Action Points |
-| 3rd | `PO3` role → −10,000 Action Points |
-| 4th | 10-minute timeout |
-| 5th | 1-hour timeout |
+| 1st | Warning only — no penalty |
+| 2nd | `PO1` role → −1,000 Action Points |
+| 3rd | `PO2` role → −3,000 Action Points |
+| 4th | `PO3` role → −10,000 Action Points |
+| 5th | 10-minute timeout |
 | 6th | 1-hour timeout |
-| 7th | 24-hour timeout |
+| 7th | 1-hour timeout |
+| 8th | 24-hour timeout |
 
 Members with **Manage Server** and bot accounts are always exempt. Deleting
 an offending message doesn't reverse the offence — the record and any
@@ -234,12 +237,21 @@ applied punishment stand.
 
 ### Pidgin Enforcement Layer
 
+- **Base dictionary**: `omo`, `dey`, `abeg`, `una`, `watin`, `wetin`,
+  `wahala`, `sabi` — `na` was removed since it was prone to sitting inside
+  otherwise-innocuous words even with word-boundary matching guarding
+  against direct substring hits. Add it back anytime with `/pidgin add na`
+  if you want it.
 - **Stretched-spelling detection**: any run of 2+ identical letters
   collapses to one before matching, so `omo`/`omoo`/`omoooo`/`omoooooo` all
   normalize to the same form — same for the dictionary entries themselves,
   so matching stays consistent in both directions.
 - **False-positive protection**: matching is word-boundary-safe, not plain
-  substring — `banana` never triggers on `na`, per spec §4.
+  substring — e.g. `banana` won't trigger on a bare `na` if you ever add it
+  back, per spec §4.
+- **Escalation starts with a warning**: the 1st offence in a day is a
+  warning only (no AP loss, no timeout) — see the table above. `PO1`/`PO2`/
+  `PO3` now trigger on the 2nd–4th offence, and timeouts on the 5th–8th.
 - **One offence per message, always**: enforced with a `UNIQUE` constraint
   on the Discord message ID (`pidgin_offences.message_id`), guarded by a
   Postgres advisory lock per user+guild during the check-and-insert to
@@ -249,9 +261,13 @@ applied punishment stand.
   the identical pipeline as new messages, still capped at one offence via
   the same message-ID uniqueness.
 - **Daily counting without deleting history**: a user's "current" offence
-  count is computed as offences since 00:00 UTC (or since their most recent
-  `/pidgin reset`, if later that day) — so `/pidgin reset` can zero the
-  active count without ever deleting a `pidgin_offences` row.
+  count is computed as offences since 00:00 UTC, or since their most recent
+  `/pidgin reset`, or since the guild's most recent `/pidgin resetall` —
+  whichever is latest — so resets zero the active count without ever
+  deleting a `pidgin_offences` row.
+- **Checking someone's current count**: `/pidgin streak @user` reads that
+  same computed value without recording anything, and previews what their
+  next offence today would trigger.
 - **Channel scope**: server-wide by default; `/pidgin channels remove`
   excludes a channel, `/pidgin channels add` re-includes it. Supports any
   number of channels.

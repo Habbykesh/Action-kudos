@@ -114,3 +114,16 @@ CREATE TABLE IF NOT EXISTS pidgin_manual_resets (
 );
 
 CREATE INDEX IF NOT EXISTS idx_pidgin_reset_user_day ON pidgin_manual_resets (guild_id, user_id, created_at);
+
+-- Guild-wide reset events (/pidgin resetall). Same non-destructive pattern
+-- as pidgin_manual_resets, but applies to every user in the guild at once —
+-- e.g. after an escalation-table change, to clear active counts that were
+-- accumulated under the old rules without touching offence history.
+CREATE TABLE IF NOT EXISTS pidgin_guild_resets (
+  id SERIAL PRIMARY KEY,
+  guild_id TEXT NOT NULL,
+  reset_by TEXT,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_pidgin_guild_reset_day ON pidgin_guild_resets (guild_id, created_at);
