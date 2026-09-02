@@ -12,7 +12,6 @@ const BASE_TERMS = [
   'watin',
   'wetin',
   'wahala',
-  'na',
   'sabi',
 ];
 
