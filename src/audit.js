@@ -76,4 +76,6 @@ module.exports = {
   postPendingEngageReward,
   postActionPointReward,
   postDuplicateHelperRoleFlag,
+  getAuditChannel,
+  messageLink,
 };

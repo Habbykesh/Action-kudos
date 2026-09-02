@@ -7,6 +7,10 @@ const { recoverGuild } = require('./recovery');
 const { tryProcessThankYou } = require('./rewardService');
 const thanksCommand = require('./commands/thanks');
 const rewardsCommand = require('./commands/rewards');
+const pidginCommand = require('./commands/pidgin');
+const pidginConfig = require('./pidgin/pidginConfig');
+const { ensurePidginRoles } = require('./pidgin/poRoles');
+const pidginService = require('./pidgin/pidginService');
 
 const client = new Client({
   intents: [
@@ -21,6 +25,7 @@ const client = new Client({
 client.commands = new Collection();
 client.commands.set(thanksCommand.data.name, thanksCommand);
 client.commands.set(rewardsCommand.data.name, rewardsCommand);
+client.commands.set(pidginCommand.data.name, pidginCommand);
 
 let heartbeatTimer = null;
 
@@ -33,6 +38,14 @@ client.once('ready', async () => {
   await botConfig.ensureGuildRow(guild.id);
   await ensureHelperRole(guild);
 
+  // Pidgin Enforcement Layer setup — independent of the Thank-You layer
+  // above. Its config row and PO roles are ensured regardless of whether
+  // enforcement is currently toggled on.
+  await pidginConfig.ensureGuildRow(guild.id);
+  await ensurePidginRoles(guild).catch((err) => {
+    console.error('[bot] Failed to ensure Pidgin PO roles at startup:', err);
+  });
+
   await recoverGuild(client, guild);
 
   heartbeatTimer = setInterval(() => {
@@ -41,11 +54,24 @@ client.once('ready', async () => {
     });
   }, config.heartbeatIntervalMs);
 
-  console.log('[bot] Ready and listening for thank-you messages.');
+  console.log('[bot] Ready and listening for thank-you messages and Pidgin Enforcement.');
 });
 
 client.on('messageCreate', (message) => {
+  // The Thank-You Recognition Layer and Pidgin Enforcement Layer are fully
+  // independent: each checks its own enabled flag internally, and neither
+  // one's toggle state affects whether the other runs.
   tryProcessThankYou(client, message);
+  pidginService.processMessage(client, message);
+});
+
+client.on('messageUpdate', async (oldMessage, newMessage) => {
+  try {
+    const full = newMessage.partial ? await newMessage.fetch() : newMessage;
+    await pidginService.processMessage(client, full, { edited: true });
+  } catch (err) {
+    console.error('[bot] Failed to process edited message for Pidgin Enforcement:', err);
+  }
 });
 
 client.on('interactionCreate', async (interaction) => {

@@ -2,8 +2,9 @@ const { REST, Routes } = require('discord.js');
 const config = require('./config');
 const thanksCommand = require('./commands/thanks');
 const rewardsCommand = require('./commands/rewards');
+const pidginCommand = require('./commands/pidgin');
 
-const commands = [thanksCommand.data.toJSON(), rewardsCommand.data.toJSON()];
+const commands = [thanksCommand.data.toJSON(), rewardsCommand.data.toJSON(), pidginCommand.data.toJSON()];
 
 const rest = new REST({ version: '10' }).setToken(config.discordToken);
 
