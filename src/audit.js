@@ -13,18 +13,17 @@ async function getAuditChannel(client) {
   return channel;
 }
 
-async function postPendingEngageReward(client, { guildId, channelId, helperId, thankerId, helpMessageId, thankMessageId, amount }) {
+async function postAiVerificationFailure(client, { guildId, channelId, helperId, thankerId, helpMessageId, thankMessageId }) {
   const channel = await getAuditChannel(client);
   if (!channel) return;
 
   const embed = new EmbedBuilder()
-    .setColor(0xf5c518)
-    .setTitle('🟡 ENGAGE POINT REWARD PENDING')
+    .setColor(0xed4245)
+    .setTitle('⚠️ AI VERIFICATION FAILED — NO REWARD ISSUED')
+    .setDescription('The Gemini verification call timed out, errored, or returned an unexpected response. No reward was granted. Review manually if this looks like genuine help.')
     .addFields(
       { name: 'Helper', value: `<@${helperId}>`, inline: true },
-      { name: 'Helped', value: `<@${thankerId}>`, inline: true },
-      { name: 'Reward', value: `${amount} Engage Points`, inline: true },
-      { name: 'Status', value: 'Pending', inline: true },
+      { name: 'Thanker', value: `<@${thankerId}>`, inline: true },
       { name: 'Help Message', value: `[View](${messageLink(guildId, channelId, helpMessageId)})`, inline: true },
       { name: 'Thank-You Message', value: `[View](${messageLink(guildId, channelId, thankMessageId)})`, inline: true },
     )
@@ -73,7 +72,7 @@ async function postDuplicateHelperRoleFlag(client, { guildId, channelId, helperI
 }
 
 module.exports = {
-  postPendingEngageReward,
+  postAiVerificationFailure,
   postActionPointReward,
   postDuplicateHelperRoleFlag,
   getAuditChannel,

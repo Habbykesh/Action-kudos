@@ -1,4 +1,6 @@
--- Records every reward event (one row per qualifying thank-you message).
+-- Records every reward event, and now also every AI-verification outcome
+-- (even non-rewards) so nothing about the Thank-You pipeline is silently
+-- lost — see rewardService.js / aiVerifier.js.
 CREATE TABLE IF NOT EXISTS reward_events (
   id SERIAL PRIMARY KEY,
   guild_id TEXT NOT NULL,
@@ -7,10 +9,10 @@ CREATE TABLE IF NOT EXISTS reward_events (
   help_message_id TEXT NOT NULL,
   thank_message_id TEXT NOT NULL UNIQUE,
   channel_id TEXT NOT NULL,
-  reward_type TEXT NOT NULL,       -- 'action_point' | 'engage_point'
+  reward_type TEXT NOT NULL,       -- 'action_point' | 'engage_point' (legacy, no longer generated) | 'none' (ai_rejected/ai_failed rows)
   reward_amount INTEGER NOT NULL,
-  og_status BOOLEAN NOT NULL,
-  reward_state TEXT NOT NULL,      -- 'completed' | 'pending' | 'flagged_duplicate'
+  og_status BOOLEAN NOT NULL,      -- vestigial: the OG/non-OG split was removed; always true now
+  reward_state TEXT NOT NULL,      -- 'completed' | 'pending' (legacy) | 'flagged_duplicate' | 'ai_rejected' | 'ai_failed'
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 

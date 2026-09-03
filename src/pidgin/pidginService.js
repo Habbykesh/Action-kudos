@@ -7,7 +7,7 @@ const { ensurePidginRoles, hasSufficientHierarchy } = require('./poRoles');
 const pidginPunishment = require('./pidginPunishment');
 const pidginAudit = require('./pidginAudit');
 
-const WARNING_DELETE_MS = 30 * 1000;
+const WARNING_DELETE_MS = 2 * 60 * 1000;
 
 function messageLink(guildId, channelId, messageId) {
   return `https://discord.com/channels/${guildId}/${channelId}/${messageId}`;

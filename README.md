@@ -2,16 +2,20 @@
 
 Two fully independent systems in one bot:
 
-- **Thank-You Recognition Layer** — reply-based thank-you detection → helper
-  reward (1,000 Action Points via a temporary `Helper` role + MEE6, or 100
-  pending Engage Points logged to an audit channel). No AI — a curated,
-  multilingual phrase list, extendable per-server with `/thanks add`.
+- **Thank-You Recognition Layer** — reply-based thank-you detection, then a
+  Gemini AI verification step that classifies the thank-you as genuine
+  ecosystem-relevant help or a mere pleasantry, then a universal 1,000
+  Action Point reward (via a temporary `Helper` role + MEE6) for every
+  AI-verified genuine thank-you. Detection itself is still a curated,
+  multilingual phrase list, extendable per-server with `/thanks add` — the
+  AI only ever answers "help or pleasantry?", never reward amount or
+  eligibility.
 - **Pidgin Enforcement Layer** — detects configured Pidgin words/phrases
   (stretched spellings, punctuation, and emoji included) and escalates
-  per-user, per-UTC-day: PO1/PO2/PO3 role → Action Point deduction on the
-  first three offences, then a 10-minute → 1-hour → 1-hour → 24-hour
-  Discord timeout on the fourth through seventh. No AI here either — a
-  plain, word-boundary-safe dictionary match, extendable with `/pidgin add`.
+  per-user, per-UTC-day: a warning on the 1st offence, then PO1/PO2/PO3
+  role → Action Point deduction on the 2nd–4th, then a 10-minute → 1-hour →
+  1-hour → 24-hour Discord timeout on the 5th–8th. No AI here — a plain,
+  word-boundary-safe dictionary match, extendable with `/pidgin add`.
 
 Each layer has its own on/off toggle (`/rewards` vs `/pidgin on|off`) and its
 own database tables. **Turning one off has no effect on the other** — see
@@ -31,7 +35,8 @@ src/
   matcher.js            text normalization + phrase matching
   customPhrases.js      DB-backed per-server custom phrases
   phraseEngine.js        merges built-in + custom, cached per guild
-  rewardService.js      the core pipeline: validity, limits, DB writes, rewards
+  aiVerifier.js          Gemini binary classifier: GENUINE_HELP vs PLEASANTRY
+  rewardService.js      the core pipeline: eligibility, AI gate, DB writes, universal reward
   helperRole.js         creates/reuses the persistent "Helper" role
   botConfig.js          per-guild config + heartbeat (for recovery)
   recovery.js           downtime recovery scan
@@ -88,19 +93,24 @@ https://discord.com/api/oauth2/authorize?client_id=CLIENT_ID&permissions=1099780
 
 That permission integer covers: View Channels, Send Messages, Read Message
 History, Manage Roles, Embed Links, and **Moderate Members** (the last one is
-needed for the Pidgin layer's timeout punishments on the 4th–7th offence).
-**Important:** in Server Settings → Roles, drag the bot's role **above** the
-`OG` role and **above** the `Helper`, `PO1`, `PO2`, and `PO3` roles it will
-create — Discord won't let a bot assign/manage a role positioned above its
-own, and the Pidgin layer checks this before attempting a role assignment
-so it can log a clear failure instead of a raw API error.
+needed for the Pidgin layer's timeout punishments). **Important:** in Server
+Settings → Roles, drag the bot's role **above** the `Helper`, `PO1`, `PO2`,
+and `PO3` roles it will create — Discord won't let a bot assign/manage a
+role positioned above its own, and both layers check this before attempting
+a role assignment so they can log a clear failure instead of a raw API error.
 
 ### Collect the IDs you'll need
 
 Enable Developer Mode (User Settings → Advanced), then right-click to copy:
 - Your server → `GUILD_ID`
-- Your existing `OG` role → `OG_ROLE_ID`
-- The channel you want reward audit logs posted in → `AUDIT_CHANNEL_ID`
+- The channel you want reward/enforcement audit logs posted in → `AUDIT_CHANNEL_ID`
+
+### Get a Gemini API key
+
+Go to [Google AI Studio](https://aistudio.google.com/apikey) → **Create API
+key**. No credit card required for the free tier. This is `GEMINI_API_KEY`
+— required, since the Thank-You layer now can't verify (and therefore won't
+reward) anything without it.
 
 ## 2. Set up Railway
 
@@ -113,13 +123,14 @@ Enable Developer Mode (User Settings → Advanced), then right-click to copy:
    | `DISCORD_TOKEN` | from step 1 |
    | `CLIENT_ID` | from step 1 |
    | `GUILD_ID` | your server ID |
-   | `OG_ROLE_ID` | your OG role ID |
    | `AUDIT_CHANNEL_ID` | your audit channel ID |
+   | `GEMINI_API_KEY` | from Google AI Studio |
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (reference variable — click "Add Reference" and pick the Postgres service's `DATABASE_URL`) |
 
    Optional (defaults shown, only add if you want different values):
-   `ACTION_POINTS_PER_REWARD=1000`, `ENGAGE_POINTS_PER_REWARD=100`,
-   `HELPER_DAILY_LIMIT=15`, `HELP_WINDOW_HOURS=24`,
+   `GEMINI_MODEL=gemini-2.5-flash`, `GEMINI_TIMEOUT_MS=8000`,
+   `GEMINI_CONTEXT_MESSAGE_COUNT=4`, `ACTION_POINTS_PER_REWARD=1000`,
+   `HELPER_DAILY_LIMIT=15`, `THANKER_DAILY_LIMIT=15`, `HELP_WINDOW_HOURS=24`,
    `HEARTBEAT_INTERVAL_MS=30000`, `DATABASE_SSL=false`.
 
 4. **Settings** tab on the bot service → confirm:
@@ -204,12 +215,20 @@ applied punishment stand.
 ## 5. Verify it works
 
 1. In your server, have one member reply to another member's message with
-   "thanks!" — the helper should either get the temporary `Helper` role
-   (if OG) or a public pending-Engage-Points message (if not OG), and an
-   entry should appear in your audit channel.
+   something acknowledging real help, e.g. "thanks for explaining how to
+   connect my wallet!" — after a moment (the Gemini call), the helper should
+   get the temporary `Helper` role and a public reward message, with an
+   entry in your audit channel. Then try a pure pleasantry reply like
+   "thanks for the welcome!" — it should be silently classified as
+   PLEASANTRY and produce no reward (check your terminal/Railway logs to
+   confirm the AI call happened).
 2. Run `/thanks list` to confirm the command works and see custom phrases (empty at first).
 3. Run `/thanks add big ups`, then test that phrase in a reply.
-4. Restart the Railway service (Settings → Restart) mid-conversation, send a
+4. Temporarily set `GEMINI_API_KEY` to something invalid and redeploy —
+   confirm a would-be genuine thank-you now produces an
+   "AI VERIFICATION FAILED" entry in the audit channel instead of a reward,
+   then restore the real key.
+5. Restart the Railway service (Settings → Restart) mid-conversation, send a
    qualifying thank-you while it's down, then bring it back — it should
    catch up on startup via the recovery scan.
 
@@ -230,10 +249,31 @@ applied punishment stand.
   since the last heartbeat, running them through the identical validation
   pipeline. Threads aren't scanned in this first version — let me know if
   you want that added.
-- **Phrase matching**: plain curated substring/word-boundary matching, no
-  AI — predictable and fully auditable, exactly as specified. The built-in
-  library is a solid starting set per language; use `/thanks add` /
-  `/thanks remove` to tune it to how your community actually talks.
+- **Phrase matching stays deterministic**: detecting a *potential*
+  thank-you is still plain curated substring/word-boundary matching, no AI
+  — that part is predictable and fully auditable. The built-in library is a
+  solid starting set per language; use `/thanks add` / `/thanks remove` to
+  tune it to how your community actually talks.
+- **AI is a binary gate, nothing more**: `aiVerifier.js` only ever returns
+  `GENUINE_HELP`, `PLEASANTRY`, or `null` (failure). It never sees or
+  decides reward amount, daily limits, roles, or eligibility — all of that
+  is resolved by deterministic checks in `rewardService.js` before the AI
+  is ever called, both to keep the AI's blast radius small and to conserve
+  free-tier Gemini quota (spec §9).
+- **Fail-safe on AI failure**: a timeout, HTTP error, unparseable response,
+  or unexpected classification value all collapse to the same outcome — no
+  reward, logged to `reward_events` (`ai_failed`) and posted to the audit
+  channel for a human to review, per spec §8.
+- **Pleasantries are logged too**: a `PLEASANTRY` classification also
+  writes a row (`ai_rejected`) — not for the audit channel (that'd be
+  noisy), but so the exact same message can never be reprocessed twice
+  (e.g. by the downtime-recovery scan) and so there's a paper trail if you
+  want to review the AI's calls later.
+- **Universal reward**: the OG/non-OG split and the old 100 Engage Points
+  path are both gone. Every AI-verified genuine-help thank-you earns the
+  same 1,000 Action Points via the same Helper-role + MEE6 mechanism —
+  `og_status` stays in the schema for backward compatibility with old rows
+  but is always `true` going forward and no longer means anything.
 
 ### Pidgin Enforcement Layer
 
