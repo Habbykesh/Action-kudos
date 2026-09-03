@@ -64,20 +64,55 @@ function parseClassification(rawText) {
   return null;
 }
 
-/**
- * Classifies a thank-you as GENUINE_HELP or PLEASANTRY using Gemini.
- *
- * Returns { classification: 'GENUINE_HELP' | 'PLEASANTRY' } on success.
- * Returns null on ANY failure — timeout, network error, non-2xx response,
- * unparseable output, or an unexpected classification value. Per spec §8,
- * callers MUST treat null as "do not reward, log for investigation."
- */
-async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [] }) {
-  if (!config.geminiApiKey) {
-    console.error('[aiVerifier] GEMINI_API_KEY is not configured — cannot verify, skipping reward.');
-    return null;
-  }
+const REQUEST_BODY = (contextMessages, helpMessage, thankMessage) => ({
+  system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
+  contents: [
+    {
+      role: 'user',
+      parts: [{ text: buildUserContent({ contextMessages, helpMessage, thankMessage }) }],
+    },
+  ],
+  generationConfig: {
+    temperature: 0,
+    // gemini-3.6-flash is a Gemini 3-family "thinking" model — it spends
+    // tokens reasoning internally before writing output, and those
+    // thinking tokens count against maxOutputTokens. Gemini 3 models use
+    // thinkingLevel (not the older thinkingBudget field). "low" keeps this
+    // cheap for a simple binary classification task.
+    thinkingConfig: { thinkingLevel: 'low' },
+    // Needs to comfortably cover thinking + the actual JSON answer — 32
+    // was too small and left 0 tokens for output once thinking used its
+    // share, causing an empty MAX_TOKENS response.
+    maxOutputTokens: 1024,
+    responseMimeType: 'application/json',
+    // Constrains the output at the API level, not just by asking nicely in
+    // the prompt: Gemini is structurally unable to return anything except
+    // {"classification": "GENUINE_HELP"|"PLEASANTRY"}. parseClassification()
+    // below is still kept as a defense-in-depth safety net, but with this
+    // schema it should never need to reject anything except an outright
+    // empty/truncated response.
+    responseSchema: {
+      type: 'OBJECT',
+      properties: {
+        classification: {
+          type: 'STRING',
+          enum: ['GENUINE_HELP', 'PLEASANTRY'],
+        },
+      },
+      required: ['classification'],
+      propertyOrdering: ['classification'],
+    },
+  },
+});
 
+/**
+ * A single attempt at the Gemini call. Returns:
+ * - { ok: true, classification } on success
+ * - { ok: false, retryable: true } on a timeout specifically — worth one retry
+ * - { ok: false, retryable: false } on anything else (bad key, bad request,
+ *   rate limit, unparseable output) — retrying immediately won't help
+ */
+async function performRequest({ thankMessage, helpMessage, contextMessages }) {
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), config.geminiTimeoutMs);
 
@@ -89,52 +124,13 @@ async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [
         'Content-Type': 'application/json',
         'x-goog-api-key': config.geminiApiKey,
       },
-      body: JSON.stringify({
-        system_instruction: { parts: [{ text: SYSTEM_INSTRUCTION }] },
-        contents: [
-          {
-            role: 'user',
-            parts: [{ text: buildUserContent({ contextMessages, helpMessage, thankMessage }) }],
-          },
-        ],
-        generationConfig: {
-          temperature: 0,
-          // gemini-3.6-flash is a Gemini 3-family "thinking" model — it
-          // spends tokens reasoning internally before writing output, and
-          // those thinking tokens count against maxOutputTokens. Gemini 3
-          // models use thinkingLevel (not the older thinkingBudget field).
-          // "low" keeps this cheap for a simple binary classification task.
-          thinkingConfig: { thinkingLevel: 'low' },
-          // Needs to comfortably cover thinking + the actual JSON answer —
-          // 32 was too small and left 0 tokens for output once thinking
-          // used its share, causing an empty MAX_TOKENS response.
-          maxOutputTokens: 1024,
-          responseMimeType: 'application/json',
-          // Constrains the output at the API level, not just by asking
-          // nicely in the prompt: Gemini is structurally unable to return
-          // anything except {"classification": "GENUINE_HELP"|"PLEASANTRY"}.
-          // parseClassification() below is still kept as a defense-in-depth
-          // safety net, but with this schema it should never need to reject
-          // anything except an outright empty/truncated response.
-          responseSchema: {
-            type: 'OBJECT',
-            properties: {
-              classification: {
-                type: 'STRING',
-                enum: ['GENUINE_HELP', 'PLEASANTRY'],
-              },
-            },
-            required: ['classification'],
-            propertyOrdering: ['classification'],
-          },
-        },
-      }),
+      body: JSON.stringify(REQUEST_BODY(contextMessages, helpMessage, thankMessage)),
     });
 
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       console.error(`[aiVerifier] Gemini request failed: ${response.status} ${response.statusText} — ${body.slice(0, 300)}`);
-      return null;
+      return { ok: false, retryable: false };
     }
 
     const data = await response.json();
@@ -146,27 +142,57 @@ async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [
         '[aiVerifier] Gemini used its entire token budget on internal thinking and never wrote an answer ' +
           '(finishReason: MAX_TOKENS, empty content). Consider raising maxOutputTokens or lowering thinkingLevel further.'
       );
-      return null;
+      return { ok: false, retryable: false };
     }
 
     const classification = parseClassification(rawText);
 
     if (!classification) {
       console.error('[aiVerifier] Gemini returned an unparseable/unexpected response:', JSON.stringify(data).slice(0, 500));
-      return null;
+      return { ok: false, retryable: false };
     }
 
-    return { classification };
+    return { ok: true, classification };
   } catch (err) {
     if (err.name === 'AbortError') {
       console.error(`[aiVerifier] Gemini request timed out after ${config.geminiTimeoutMs}ms`);
-    } else {
-      console.error('[aiVerifier] Gemini request errored:', err);
+      return { ok: false, retryable: true };
     }
-    return null;
+    console.error('[aiVerifier] Gemini request errored:', err);
+    return { ok: false, retryable: false };
   } finally {
     clearTimeout(timeoutHandle);
   }
+}
+
+/**
+ * Classifies a thank-you as GENUINE_HELP or PLEASANTRY using Gemini.
+ *
+ * Returns { classification: 'GENUINE_HELP' | 'PLEASANTRY' } on success.
+ * Returns null on ANY failure — timeout (after one retry), network error,
+ * non-2xx response, unparseable output, or an unexpected classification
+ * value. Per spec §8, callers MUST treat null as "do not reward, log for
+ * investigation."
+ *
+ * Retries exactly once, and only on a timeout — a single slow response
+ * shouldn't cost someone their reward, but a hard error (bad key, rate
+ * limit, malformed request) won't be fixed by immediately retrying, so
+ * those fail fast instead of doubling latency for nothing.
+ */
+async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [] }) {
+  if (!config.geminiApiKey) {
+    console.error('[aiVerifier] GEMINI_API_KEY is not configured — cannot verify, skipping reward.');
+    return null;
+  }
+
+  let result = await performRequest({ thankMessage, helpMessage, contextMessages });
+
+  if (!result.ok && result.retryable) {
+    console.error('[aiVerifier] Retrying once after timeout...');
+    result = await performRequest({ thankMessage, helpMessage, contextMessages });
+  }
+
+  return result.ok ? { classification: result.classification } : null;
 }
 
 module.exports = { classifyThankYou };

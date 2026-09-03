@@ -128,7 +128,7 @@ reward) anything without it.
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (reference variable — click "Add Reference" and pick the Postgres service's `DATABASE_URL`) |
 
    Optional (defaults shown, only add if you want different values):
-   `GEMINI_MODEL=gemini-3.6-flash`, `GEMINI_TIMEOUT_MS=12000`,
+   `GEMINI_MODEL=gemini-3.6-flash`, `GEMINI_TIMEOUT_MS=20000`,
    `GEMINI_CONTEXT_MESSAGE_COUNT=4`, `ACTION_POINTS_PER_REWARD=1000`,
    `HELPER_DAILY_LIMIT=15`, `THANKER_DAILY_LIMIT=15`, `HELP_WINDOW_HOURS=24`,
    `HEARTBEAT_INTERVAL_MS=30000`, `DATABASE_SSL=false`.
@@ -260,7 +260,12 @@ applied punishment stand.
   is resolved by deterministic checks in `rewardService.js` before the AI
   is ever called, both to keep the AI's blast radius small and to conserve
   free-tier Gemini quota (spec §9).
-- **Fail-safe on AI failure**: a timeout, HTTP error, unparseable response,
+- **One retry, only on timeout**: a single slow response shouldn't cost
+  someone their reward, so a timeout gets one automatic retry with a fresh
+  timeout window. Hard errors (bad key, rate limit, malformed request)
+  don't retry — that wouldn't fix anything and would just double the
+  latency for no benefit.
+- **Fail-safe on AI failure**: a timeout (after the retry), HTTP error, unparseable response,
   or unexpected classification value all collapse to the same outcome — no
   reward, logged to `reward_events` (`ai_failed`) and posted to the audit
   channel for a human to review, per spec §8.
