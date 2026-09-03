@@ -59,7 +59,11 @@ const config = {
   // the free tier as of this writing). Override via env if this changes
   // again — Google's free-tier model lineup moves fast.
   geminiModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
-  geminiTimeoutMs: int('GEMINI_TIMEOUT_MS', 8000),
+  // 12s gives a thinking model (even at thinkingLevel 'low') real headroom
+  // over a slow network hop or a briefly busier Gemini endpoint, without
+  // meaningfully hurting UX — a slow reward still lands a few seconds late
+  // rather than falsely failing and not rewarding at all.
+  geminiTimeoutMs: int('GEMINI_TIMEOUT_MS', 12000),
   // How many prior messages in the channel to include as extra context when
   // asking the AI to classify a thank-you. Keep this small to conserve
   // free-tier tokens/requests.
