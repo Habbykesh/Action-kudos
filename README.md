@@ -128,7 +128,7 @@ reward) anything without it.
    | `DATABASE_URL` | `${{Postgres.DATABASE_URL}}` (reference variable — click "Add Reference" and pick the Postgres service's `DATABASE_URL`) |
 
    Optional (defaults shown, only add if you want different values):
-   `GEMINI_MODEL=gemini-2.5-flash`, `GEMINI_TIMEOUT_MS=8000`,
+   `GEMINI_MODEL=gemini-3.6-flash`, `GEMINI_TIMEOUT_MS=8000`,
    `GEMINI_CONTEXT_MESSAGE_COUNT=4`, `ACTION_POINTS_PER_REWARD=1000`,
    `HELPER_DAILY_LIMIT=15`, `THANKER_DAILY_LIMIT=15`, `HELP_WINDOW_HOURS=24`,
    `HEARTBEAT_INTERVAL_MS=30000`, `DATABASE_SSL=false`.

@@ -15,12 +15,7 @@ GENUINE_HELP means the message being thanked actually helped with something like
 
 PLEASANTRY means the thank-you is NOT acknowledging that kind of help — e.g. thanking someone for asking a question, for a compliment, for an invite, for a welcome, for birthday wishes, for a follow, or general social/casual conversation with no real assistance behind it.
 
-Judge intent using the conversation context provided, not just the thank-you wording in isolation — "thank you" alone could be either, depending on what it's replying to.
-
-Respond with ONLY one line of raw JSON and nothing else — no markdown fences, no explanation, no extra text:
-{"classification":"GENUINE_HELP"}
-or
-{"classification":"PLEASANTRY"}`;
+Judge intent using the conversation context provided, not just the thank-you wording in isolation — "thank you" alone could be either, depending on what it's replying to.`;
 
 function truncate(text, max = 500) {
   if (!text) return '(no text content)';
@@ -104,8 +99,34 @@ async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [
         ],
         generationConfig: {
           temperature: 0,
-          maxOutputTokens: 32,
+          // gemini-3.6-flash is a Gemini 3-family "thinking" model — it
+          // spends tokens reasoning internally before writing output, and
+          // those thinking tokens count against maxOutputTokens. Gemini 3
+          // models use thinkingLevel (not the older thinkingBudget field).
+          // "low" keeps this cheap for a simple binary classification task.
+          thinkingConfig: { thinkingLevel: 'low' },
+          // Needs to comfortably cover thinking + the actual JSON answer —
+          // 32 was too small and left 0 tokens for output once thinking
+          // used its share, causing an empty MAX_TOKENS response.
+          maxOutputTokens: 1024,
           responseMimeType: 'application/json',
+          // Constrains the output at the API level, not just by asking
+          // nicely in the prompt: Gemini is structurally unable to return
+          // anything except {"classification": "GENUINE_HELP"|"PLEASANTRY"}.
+          // parseClassification() below is still kept as a defense-in-depth
+          // safety net, but with this schema it should never need to reject
+          // anything except an outright empty/truncated response.
+          responseSchema: {
+            type: 'OBJECT',
+            properties: {
+              classification: {
+                type: 'STRING',
+                enum: ['GENUINE_HELP', 'PLEASANTRY'],
+              },
+            },
+            required: ['classification'],
+            propertyOrdering: ['classification'],
+          },
         },
       }),
     });
@@ -117,7 +138,17 @@ async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [
     }
 
     const data = await response.json();
-    const rawText = data?.candidates?.[0]?.content?.parts?.[0]?.text;
+    const candidate = data?.candidates?.[0];
+    const rawText = candidate?.content?.parts?.[0]?.text;
+
+    if (!rawText && candidate?.finishReason === 'MAX_TOKENS') {
+      console.error(
+        '[aiVerifier] Gemini used its entire token budget on internal thinking and never wrote an answer ' +
+          '(finishReason: MAX_TOKENS, empty content). Consider raising maxOutputTokens or lowering thinkingLevel further.'
+      );
+      return null;
+    }
+
     const classification = parseClassification(rawText);
 
     if (!classification) {

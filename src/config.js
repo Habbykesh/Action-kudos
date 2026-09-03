@@ -18,6 +18,18 @@ function int(name, fallback) {
   return parsed;
 }
 
+function normalizeModelName(raw) {
+  if (!raw) return raw;
+  let name = raw.trim();
+  // Strip surrounding quotes in case they were pasted in by mistake.
+  name = name.replace(/^['"]|['"]$/g, '');
+  // Google's own error messages say things like "use models/gemini-3.6-flash"
+  // — if that whole string gets pasted into the env var, strip the prefix
+  // back off so the URL doesn't end up as .../models/models/gemini-3.6-flash.
+  name = name.replace(/^models\//, '');
+  return name;
+}
+
 const config = {
   discordToken: required('DISCORD_TOKEN'),
   clientId: required('CLIENT_ID'),
@@ -42,9 +54,11 @@ const config = {
   // Required: without it, tryProcessThankYou can't verify anything and will
   // never reward (see aiVerifier.js — that's the deliberate fail-safe).
   geminiApiKey: required('GEMINI_API_KEY'),
-  // gemini-2.5-flash is a stable (non-preview) free-tier model as of this
-  // writing. Override if your project's available free-tier models change.
-  geminiModel: process.env.GEMINI_MODEL || 'gemini-2.5-flash',
+  // gemini-2.5-flash was deprecated for new API keys/projects (Google
+  // pointed migrators to gemini-3.6-flash, released July 2026, still on
+  // the free tier as of this writing). Override via env if this changes
+  // again — Google's free-tier model lineup moves fast.
+  geminiModel: process.env.GEMINI_MODEL || 'gemini-3.6-flash',
   geminiTimeoutMs: int('GEMINI_TIMEOUT_MS', 8000),
   // How many prior messages in the channel to include as extra context when
   // asking the AI to classify a thank-you. Keep this small to conserve
