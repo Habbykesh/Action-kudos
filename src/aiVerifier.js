@@ -105,12 +105,20 @@ const REQUEST_BODY = (contextMessages, helpMessage, thankMessage) => ({
   },
 });
 
+// HTTP status codes worth retrying: 429 (rate limited), and the 5xx family
+// Google itself describes as transient ("high demand... usually
+// temporary" for 503, similar for 500/502/504). Anything else (400 bad
+// request, 401/403 auth, 404 unknown model) is a real problem that an
+// immediate retry won't fix.
+const RETRYABLE_STATUS_CODES = new Set([429, 500, 502, 503, 504]);
+
 /**
  * A single attempt at the Gemini call. Returns:
  * - { ok: true, classification } on success
- * - { ok: false, retryable: true } on a timeout specifically — worth one retry
- * - { ok: false, retryable: false } on anything else (bad key, bad request,
- *   rate limit, unparseable output) — retrying immediately won't help
+ * - { ok: false, retryable: true } on a timeout, or a transient HTTP error
+ *   (429/5xx) — worth one retry
+ * - { ok: false, retryable: false } on anything else (bad key, bad
+ *   request, unparseable output) — retrying immediately won't help
  */
 async function performRequest({ thankMessage, helpMessage, contextMessages }) {
   const controller = new AbortController();
@@ -130,7 +138,7 @@ async function performRequest({ thankMessage, helpMessage, contextMessages }) {
     if (!response.ok) {
       const body = await response.text().catch(() => '');
       console.error(`[aiVerifier] Gemini request failed: ${response.status} ${response.statusText} — ${body.slice(0, 300)}`);
-      return { ok: false, retryable: false };
+      return { ok: false, retryable: RETRYABLE_STATUS_CODES.has(response.status) };
     }
 
     const data = await response.json();
@@ -169,16 +177,25 @@ async function performRequest({ thankMessage, helpMessage, contextMessages }) {
  * Classifies a thank-you as GENUINE_HELP or PLEASANTRY using Gemini.
  *
  * Returns { classification: 'GENUINE_HELP' | 'PLEASANTRY' } on success.
- * Returns null on ANY failure — timeout (after one retry), network error,
- * non-2xx response, unparseable output, or an unexpected classification
- * value. Per spec §8, callers MUST treat null as "do not reward, log for
- * investigation."
+ * Returns null on ANY failure — timeout, transient error (both after one
+ * retry), a hard error, unparseable output, or an unexpected
+ * classification value. Per spec §8, callers MUST treat null as "do not
+ * reward, log for investigation."
  *
- * Retries exactly once, and only on a timeout — a single slow response
- * shouldn't cost someone their reward, but a hard error (bad key, rate
- * limit, malformed request) won't be fixed by immediately retrying, so
- * those fail fast instead of doubling latency for nothing.
+ * Retries exactly once, and only when it's likely to help: a timeout, or a
+ * transient server-side error (429 rate limit, 5xx — Google's own error
+ * text calls these "usually temporary"). A short backoff runs before that
+ * retry, since an instant retry into the same busy moment is less likely
+ * to succeed than a brief pause. A hard error (bad key, malformed
+ * request, bad model name) won't be fixed by retrying at all, so those
+ * fail fast instead of doubling latency for nothing.
  */
+const RETRY_BACKOFF_MS = 2000;
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [] }) {
   if (!config.geminiApiKey) {
     console.error('[aiVerifier] GEMINI_API_KEY is not configured — cannot verify, skipping reward.');
@@ -188,7 +205,8 @@ async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [
   let result = await performRequest({ thankMessage, helpMessage, contextMessages });
 
   if (!result.ok && result.retryable) {
-    console.error('[aiVerifier] Retrying once after timeout...');
+    console.error(`[aiVerifier] Retrying once after a ${RETRY_BACKOFF_MS}ms backoff...`);
+    await delay(RETRY_BACKOFF_MS);
     result = await performRequest({ thankMessage, helpMessage, contextMessages });
   }
 
