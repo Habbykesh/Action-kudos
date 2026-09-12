@@ -17,7 +17,7 @@ PLEASANTRY means the thank-you is NOT acknowledging that kind of help — e.g. t
 
 Judge intent using the conversation context provided, not just the thank-you wording in isolation — "thank you" alone could be either, depending on what it's replying to.`;
 
-function truncate(text, max = 500) {
+function truncate(text, max = 300) {
   if (!text) return '(no text content)';
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -177,20 +177,25 @@ async function performRequest({ thankMessage, helpMessage, contextMessages }) {
  * Classifies a thank-you as GENUINE_HELP or PLEASANTRY using Gemini.
  *
  * Returns { classification: 'GENUINE_HELP' | 'PLEASANTRY' } on success.
- * Returns null on ANY failure — timeout, transient error (both after one
- * retry), a hard error, unparseable output, or an unexpected
+ * Returns null on ANY failure — timeout, transient error (both after
+ * retries), a hard error, unparseable output, or an unexpected
  * classification value. Per spec §8, callers MUST treat null as "do not
  * reward, log for investigation."
  *
- * Retries exactly once, and only when it's likely to help: a timeout, or a
- * transient server-side error (429 rate limit, 5xx — Google's own error
- * text calls these "usually temporary"). A short backoff runs before that
- * retry, since an instant retry into the same busy moment is less likely
- * to succeed than a brief pause. A hard error (bad key, malformed
- * request, bad model name) won't be fixed by retrying at all, so those
- * fail fast instead of doubling latency for nothing.
+ * Retries up to twice (3 attempts total), and only when it's likely to
+ * help: a timeout, or a transient server-side error (429 rate limit, 5xx —
+ * Google's own error text calls these "usually temporary"). Backoff grows
+ * between attempts (2s, then 4s) rather than hammering the same busy
+ * endpoint repeatedly. A hard error (bad key, malformed request, bad model
+ * name) won't be fixed by retrying at all, so those fail fast instead of
+ * adding latency for nothing.
+ *
+ * This is a resilience improvement, not a guarantee — a free-tier endpoint
+ * under sustained heavy load can still exhaust all 3 attempts. When that
+ * happens the failure is logged to the audit channel with full context so
+ * a moderator can manually grant the reward via /rewards grant.
  */
-const RETRY_BACKOFF_MS = 2000;
+const RETRY_BACKOFFS_MS = [2000, 4000];
 
 function delay(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -204,9 +209,10 @@ async function classifyThankYou({ thankMessage, helpMessage, contextMessages = [
 
   let result = await performRequest({ thankMessage, helpMessage, contextMessages });
 
-  if (!result.ok && result.retryable) {
-    console.error(`[aiVerifier] Retrying once after a ${RETRY_BACKOFF_MS}ms backoff...`);
-    await delay(RETRY_BACKOFF_MS);
+  for (const backoffMs of RETRY_BACKOFFS_MS) {
+    if (result.ok || !result.retryable) break;
+    console.error(`[aiVerifier] Retrying after a ${backoffMs}ms backoff...`);
+    await delay(backoffMs);
     result = await performRequest({ thankMessage, helpMessage, contextMessages });
   }
 

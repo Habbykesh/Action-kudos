@@ -71,10 +71,32 @@ async function postDuplicateHelperRoleFlag(client, { guildId, channelId, helperI
   await channel.send({ embeds: [embed] });
 }
 
+async function postManualGrantReward(client, { guildId, channelId, helperId, thankerId, helpMessageId, thankMessageId, amount, moderatorId, previousState }) {
+  const channel = await getAuditChannel(client);
+  if (!channel) return;
+
+  const embed = new EmbedBuilder()
+    .setColor(0x5865f2)
+    .setTitle('🛠️ REWARD MANUALLY GRANTED (AI verification bypassed)')
+    .setDescription(`AI verification previously resulted in \`${previousState}\`. A moderator reviewed it manually and granted the reward.`)
+    .addFields(
+      { name: 'Helper', value: `<@${helperId}>`, inline: true },
+      { name: 'Helped', value: `<@${thankerId}>`, inline: true },
+      { name: 'Reward', value: `${amount} Action Points (via Helper role → MEE6)`, inline: true },
+      { name: 'Granted by', value: `<@${moderatorId}>`, inline: true },
+      { name: 'Help Message', value: `[View](${messageLink(guildId, channelId, helpMessageId)})`, inline: true },
+      { name: 'Thank-You Message', value: `[View](${messageLink(guildId, channelId, thankMessageId)})`, inline: true },
+    )
+    .setTimestamp(new Date());
+
+  await channel.send({ embeds: [embed] });
+}
+
 module.exports = {
   postAiVerificationFailure,
   postActionPointReward,
   postDuplicateHelperRoleFlag,
+  postManualGrantReward,
   getAuditChannel,
   messageLink,
 };

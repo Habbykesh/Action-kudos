@@ -65,9 +65,11 @@ const config = {
   // retry-on-timeout below.
   geminiTimeoutMs: int('GEMINI_TIMEOUT_MS', 20000),
   // How many prior messages in the channel to include as extra context when
-  // asking the AI to classify a thank-you. Keep this small to conserve
-  // free-tier tokens/requests.
-  geminiContextMessageCount: int('GEMINI_CONTEXT_MESSAGE_COUNT', 4),
+  // asking the AI to classify a thank-you. Kept small (2, not more) so
+  // requests stay light and fast — this both conserves free-tier
+  // tokens/requests and reduces timeout risk, since a smaller request
+  // finishes quicker even when Gemini is running a bit slow.
+  geminiContextMessageCount: int('GEMINI_CONTEXT_MESSAGE_COUNT', 2),
 };
 
 module.exports = config;

@@ -13,6 +13,8 @@ CREATE TABLE IF NOT EXISTS reward_events (
   reward_amount INTEGER NOT NULL,
   og_status BOOLEAN NOT NULL,      -- vestigial: the OG/non-OG split was removed; always true now
   reward_state TEXT NOT NULL,      -- 'completed' | 'pending' (legacy) | 'flagged_duplicate' | 'ai_rejected' | 'ai_failed'
+  manually_granted_by TEXT,        -- moderator user ID, set only when /rewards grant overrides an ai_failed/ai_rejected row
+  manually_granted_at TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
@@ -39,6 +41,11 @@ CREATE TABLE IF NOT EXISTS bot_config (
   last_seen TIMESTAMPTZ,
   enabled BOOLEAN NOT NULL DEFAULT false
 );
+
+-- Safe to re-run: adds these columns for databases created before manual
+-- grants existed.
+ALTER TABLE reward_events ADD COLUMN IF NOT EXISTS manually_granted_by TEXT;
+ALTER TABLE reward_events ADD COLUMN IF NOT EXISTS manually_granted_at TIMESTAMPTZ;
 
 -- Safe to re-run: adds the column for databases created before this existed.
 ALTER TABLE bot_config ADD COLUMN IF NOT EXISTS enabled BOOLEAN NOT NULL DEFAULT false;

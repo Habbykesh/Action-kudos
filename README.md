@@ -42,7 +42,7 @@ src/
   recovery.js           downtime recovery scan
   audit.js              audit-channel embeds
   commands/thanks.js    /thanks add|remove|list
-  commands/rewards.js   /rewards enable|disable|status
+  commands/rewards.js   /rewards enable|disable|status|grant
 
   --- Pidgin Enforcement Layer ---
   pidgin/dictionary.js        built-in base Pidgin term list
@@ -129,7 +129,7 @@ reward) anything without it.
 
    Optional (defaults shown, only add if you want different values):
    `GEMINI_MODEL=gemini-3.6-flash`, `GEMINI_TIMEOUT_MS=20000`,
-   `GEMINI_CONTEXT_MESSAGE_COUNT=4`, `ACTION_POINTS_PER_REWARD=1000`,
+   `GEMINI_CONTEXT_MESSAGE_COUNT=2`, `ACTION_POINTS_PER_REWARD=1000`,
    `HELPER_DAILY_LIMIT=15`, `THANKER_DAILY_LIMIT=15`, `HELP_WINDOW_HOURS=24`,
    `HEARTBEAT_INTERVAL_MS=30000`, `DATABASE_SSL=false`.
 
@@ -173,6 +173,7 @@ being online doesn't mean either one is active. This is deliberate, so you
 can deploy, test, and review before anything is user-facing.
 
 - `/rewards status` / `/rewards enable` / `/rewards disable` — Thank-You layer.
+- `/rewards grant <message ID or link>` — manually complete a reward the AI failed or wrongly rejected (see "Manual override for AI misses" below).
 - `/pidgin settings` / `/pidgin on` / `/pidgin off` — Pidgin layer.
 
 They're independent toggles: enabling one does not enable the other, and
@@ -260,20 +261,32 @@ applied punishment stand.
   is resolved by deterministic checks in `rewardService.js` before the AI
   is ever called, both to keep the AI's blast radius small and to conserve
   free-tier Gemini quota (spec §9).
-- **One retry, only on timeout**: a single slow response shouldn't cost
-  someone their reward, so a timeout gets one automatic retry with a fresh
-  timeout window. Hard errors (bad key, rate limit, malformed request)
-  don't retry — that wouldn't fix anything and would just double the
-  latency for no benefit.
-- **Fail-safe on AI failure**: a timeout (after the retry), HTTP error, unparseable response,
-  or unexpected classification value all collapse to the same outcome — no
-  reward, logged to `reward_events` (`ai_failed`) and posted to the audit
-  channel for a human to review, per spec §8.
+- **Retries on timeout AND transient errors**: a slow response, a 429 rate
+  limit, or a 5xx ("high demand", "service unavailable" — Google's own
+  wording calls these temporary) all get up to 2 retries with growing
+  backoff (2s, then 4s) before giving up. A hard error (bad key, malformed
+  request, unknown model) doesn't retry — that wouldn't fix anything and
+  would just add latency for no benefit.
+- **Fail-safe on AI failure**: exhausting all retries, an unparseable
+  response, or an unexpected classification value all collapse to the same
+  outcome — no reward, logged to `reward_events` (`ai_failed`) and posted
+  to the audit channel for a human to review, per spec §8.
+- **Manual override for AI misses**: retries help, but a sustained
+  free-tier slowdown can still exhaust them on a genuine thank-you. Every
+  AI failure or pleasantry rejection is logged with the exact info needed
+  to fix it by hand: `/rewards grant <message ID or link>` (paste the
+  thank-you message's ID/link from the audit entry) manually completes the
+  reward through the exact same Helper-role + MEE6 path an AI approval
+  would have used — no separate, less-audited code path. It refuses to run
+  on anything already rewarded, and refuses (rather than risking a double
+  award) if the helper currently holds the Helper role from a still-
+  pending automation run.
 - **Pleasantries are logged too**: a `PLEASANTRY` classification also
   writes a row (`ai_rejected`) — not for the audit channel (that'd be
   noisy), but so the exact same message can never be reprocessed twice
-  (e.g. by the downtime-recovery scan) and so there's a paper trail if you
-  want to review the AI's calls later.
+  (e.g. by the downtime-recovery scan), so there's a paper trail if you
+  want to review the AI's calls later, and so `/rewards grant` can still
+  override it if the AI got a genuine-help case wrong.
 - **Universal reward**: the OG/non-OG split and the old 100 Engage Points
   path are both gone. Every AI-verified genuine-help thank-you earns the
   same 1,000 Action Points via the same Helper-role + MEE6 mechanism —
